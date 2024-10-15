@@ -1,0 +1,3 @@
+[submodule "submodule/openai"]
+	path = submodule/openai
+	url = git@github.com:sbaiso-aids/openai-gpt-wrapper.git

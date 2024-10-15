@@ -2,6 +2,7 @@ import os
 import sys
 import csv
 from typing import List, Union
+import numpy as np
 
 from pydantic import BaseModel, field_validator, ValidationError
 
@@ -18,9 +19,7 @@ handler_format = logging.Formatter(
 stream_handler.setFormatter(handler_format)
 logger.addHandler(stream_handler)
 
-sys.path.append(
-    f"{os.path.dirname(os.path.abspath(__file__))}/../../openai-gpt-wrapper"
-)
+sys.path.append(f"{os.path.dirname(os.path.abspath(__file__))}/../submodule/openai")
 from src.chat_completion import ChatCompletion
 from utils.read_environments import read_environments
 
@@ -227,7 +226,7 @@ class RAGInquiry:
             logger.error(f"Failed to get an appropriate response for {text}")
 
         output_text = response + self.get_refered_rag_data(
-            ndices=references, rag_data_for_inquiry=rag_data_for_inquiry
+            indices=references, rag_data_for_inquiry=rag_data_for_inquiry
         )
         return output_text
 
@@ -291,6 +290,7 @@ if __name__ == "__main__":
     rag_data_for_inquiry = inquirer.get_rag_data_for_inquiry(
         embedding=embedding, rag_data=rag_data
     )
-    inquirer.run_llm_chat_oishi_with_pydantic(
+    output = inquirer.run_llm_chat_oishi_with_pydantic(
         text=text, rag_data_for_inquiry=rag_data_for_inquiry
     )
+    logger.info(output)
