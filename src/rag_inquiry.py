@@ -19,6 +19,9 @@ handler_format = logging.Formatter(
 stream_handler.setFormatter(handler_format)
 logger.addHandler(stream_handler)
 
+sys.path.append(f"{os.path.dirname(os.path.abspath(__file__))}/../utils")
+from color import Color
+
 sys.path.append(f"{os.path.dirname(os.path.abspath(__file__))}/../submodule/openai")
 from src.chat_completion import ChatCompletion
 from utils.read_environments import read_environments
@@ -29,6 +32,20 @@ from rag_text_embedding import RAGTextEmbedding
 class Message(BaseModel):
     response: str
     references: List[Union[int, str]]
+
+    @field_validator("references")
+    def check_references(cls, value):
+        references = []
+        for reference in value:
+            reference = int(reference)
+            references.append(reference)
+        return references
+
+
+class MessageWithDigests(BaseModel):
+    response: str
+    references: List[Union[int, str]]
+    digests: List[str]
 
     @field_validator("references")
     def check_references(cls, value):
@@ -225,9 +242,82 @@ class RAGInquiry:
         else:
             logger.error(f"Failed to get an appropriate response for {text}")
 
-        output_text = response + self.get_refered_rag_data(
-            indices=references, rag_data_for_inquiry=rag_data_for_inquiry
+        output_text = (
+            response
+            + "\n"
+            + self.get_refered_rag_data(
+                indices=references, rag_data_for_inquiry=rag_data_for_inquiry
+            )
         )
+
+        print(Color.YELLOW + inquiry_text + Color.RESET)
+        print("")
+        print(Color.CYAN + output_text + Color.RESET)
+
+        return output_text
+
+    def run_llm_chat_oishi_with_pydantic_and_summary(
+        self, text: str, rag_data_for_inquiry: dict, number_of_retries: int = 5
+    ):
+        inquiry_text = (
+            f"{self.text_cosmetics(text)}\n"
+            "以下の情報のうち回答に関連するものがあれば参考にして回答してください。\n"
+            "また以下のフォーマットと条件を満たすように回答してください。\n"
+        )
+        for i_rag, rag in enumerate(rag_data_for_inquiry):
+            inquiry_text += f"{i_rag + 1}: {rag}\n"
+        inquiry_text += (
+            "## フォーマット\n"
+            '{"response": "(質問への回答がここに入る)", "digests": (全ての情報の要約のリストがここに入る), "references": (参考にした情報に対応する番号のリストがここに入る)}\n\n'
+        )
+        inquiry_text += (
+            "## 条件\n"
+            "- 参考にした情報の要約は各々に対し行う\n"
+            "- digestsとreferencesのリストの順番を揃える\n"
+            "- digestsとreferencesには参考にした情報のみ\n\n"
+        )
+
+        self.llm.add_message_entry_as_specified_role_with_text_content(
+            role="system",
+            text="あなたは質問とそれに関連した情報を与えられ、それらを元に回答します。",
+        )
+        self.llm.add_message_entry_as_specified_role_with_text_content(
+            role="user",
+            text=inquiry_text,
+        )
+        self.llm.print_payload_messages()
+
+        response = ""
+        references = []
+        digests = []
+        for i_trial in range(number_of_retries):
+            logger.info(f"Trial No.{i_trial+1}")
+            result = self.llm.execute()
+            model_output = self.llm.get_model_output_from_result(result=result)
+            json_parse_content, json_parse_result = self.llm.model_output_parser(
+                model_output=model_output
+            )
+            if not json_parse_result:
+                continue
+            format_parse_result = MessageWithDigests(**json_parse_content)
+            if not format_parse_result:
+                continue
+
+            response = format_parse_result.response
+            references = format_parse_result.references
+            digests = format_parse_result.digests
+            break
+        else:
+            logger.error(f"Failed to get an appropriate response for {text}")
+
+        output_text = response + "\n"
+        for digest, reference in zip(digests, references):
+            output_text += f"- {digest} ({reference})\n"
+
+        print(Color.YELLOW + inquiry_text + Color.RESET)
+        print("")
+        print(Color.CYAN + output_text + Color.RESET)
+
         return output_text
 
     def run_llm_chat_sugimoto_with_data_source(
@@ -290,7 +380,7 @@ if __name__ == "__main__":
     rag_data_for_inquiry = inquirer.get_rag_data_for_inquiry(
         embedding=embedding, rag_data=rag_data
     )
-    output = inquirer.run_llm_chat_oishi_with_pydantic(
+    output = inquirer.run_llm_chat_oishi_with_pydantic_and_summary(
         text=text, rag_data_for_inquiry=rag_data_for_inquiry
     )
     logger.info(output)
